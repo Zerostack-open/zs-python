@@ -1,0 +1,785 @@
+import __future__
+import os
+import requests
+import json
+import re
+import pprint
+
+class ZS_Rest(object):
+
+    def __init__(self,input_dict={}):
+        """
+        DESC: Set the values for Authentication
+        INPUTS: self object
+                input_dit - dictionary containing rc variables
+                    token_scope - Default project - Requiered
+                    user_region - Required
+                    username - Optional
+                    password - Optional
+                    auth_url - Optional
+                    project_name - Optional
+                    user_domain_name - Optional
+                    project_domain_name - Optional
+                    ca_cert_path - Optional
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: Domain and project scoped tokens will not allow access to the same resources. User region must be specified or
+              or an environment variable called USER_REGION must be set or sourced from the RC file.
+        """
+
+        if(input_dict['token_scope'] == None or 'token_scope' not in input_dict):
+            self.token_scope = 'project'
+
+        elif(str(input_dict['token_scope']).lower() == 'project' or str(input_dict['token_scope']).lower() == 'domain'):
+            self.token_scope = input_dict['token_scope']
+        else:
+            raise Exception("ERROR: Token scope can only be set to project or domain.")
+
+        if('user_region' not in input_dict):
+            self.user_region = os.environ.get('USER_REGION')
+        elif('user_region' in input_dict):
+            self.user_region = input_dict['user_region']
+        else:
+            raise Exception("ERROR: User region must be specified, check Zerostack Console->Infrastructure Tab, or contact the admin.")
+
+        #fill in the missing input dictionary keys with None
+        keys = ['username','password','auth_url','project_name','user_region','user_domain_name','project_domain_name','ca_cert_path']
+        for key in keys:
+            if(key not in input_dict):
+                input_dict[key] = None
+
+        self.auth_username = os.getenv('OS_USERNAME',input_dict['username'])
+        self.auth_password = os.getenv('OS_PASSWORD',input_dict['password'])
+        self.auth_url = os.getenv('OS_AUTH_URL',input_dict['auth_url'])
+        self.project_name = os.getenv('OS_PROJECT_NAME',input_dict['project_name'])
+        self.user_domain_name = os.getenv('OS_USER_DOMAIN_NAME',input_dict['user_domain_name'])
+        self.project_domain_name=os.getenv('OS_PROJECT_DOMAIN_NAME',input_dict['project_domain_name'])
+        self.cacert=os.getenv('OS_CACERT',input_dict['ca_cert_path'])
+
+        if(self.auth_username == None or self.auth_password == None or self.auth_url == None or \
+           self.project_name == None or self.user_region == None or self.user_domain_name == None or \
+           self.project_domain_name == None or self.cacert == None):
+            print "Export the Zerostack RC file, or explicitly define authentication variables"
+
+        #Derive the zerostack url from the auth url, unless specified, will not work with Zerostack glance API endpoint
+        self.zs_url = self.auth_url[:-12]
+
+    def run_rest(self,input_dict):
+        """
+        DESC: Run the rest calls
+        INPUTS: self object
+                input_dict - dictionary containing rest call information
+                    body - Optional - Default None
+                    headers - Optional - Default {"content-type":"application/json"}
+                    verify - Optional - Default False
+                    url - required
+                    verb - Rest Operation - GET,PUT,POST,DELETE,PATCH,HEAD
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: Domain and project scoped tokens will not allow access to the same resources. User region must be specified or
+              or an environment variable called USER_REGION must be set or sourced from the RC file.
+        """
+        #initialize a regex to check URL
+        regex = re.compile(
+            r'^(?:http|ftp)s?://'
+            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'
+            r'localhost|'
+            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+            r'(?::\d+)?'
+            r'(?:/?|[/?]\S+)$', re.IGNORECASE
+            )
+
+        if('body' not in input_dict):
+            self.body = None
+        else:
+            #try:
+            self.body = input_dict['body']
+            #except ValueError as v:
+            #self.body = input_dict['body']
+
+        if('headers' not in input_dict):
+            self.headers = {"content-type":"application/json"}
+        else:
+            self.headers = input_dict['headers']
+
+        if('verify' not in input_dict):
+            self.verify = True
+        else:
+            self.verify = input_dict['verify']
+
+        if('verb' not in input_dict):
+            raise Exception("ERROR: No REST verb specified.")
+
+        ops = ['POST','DELETE','PUT','GET','PATCH','HEAD']
+        if(str(input_dict['verb']).upper() not in ops):
+            raise Exception("ERROR: REST verb not valid.")
+
+        if('url' not in input_dict):
+            raise Exception("ERROR: No API URL endpoint url specified.")
+
+        if(re.match(regex, str(input_dict['url'])) is not None):
+            self.url = str(input_dict['url'])
+        else:
+            raise Exception("ERROR: API URL is mal formed.")
+
+        r = requests.request(str(input_dict['verb']).upper(), verify=self.verify, headers=self.headers, url=self.url, data=self.body)
+        out = r.raise_for_status()
+        if(out != None):
+            raise Exception(out)
+
+        return r
+
+class ZS_Auth(object):
+
+    def __init__(self,input_dict):
+        """
+        DESC: Set the values for Authentication
+        INPUTS: self object
+                input_dict - token_scope
+                           - user_region
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: Domain and project scoped tokens will not allow access to the same resources
+        """
+        self.rest = ZS_Rest(input_dict)
+
+    def authenticate(self):
+        """
+        DESC: Use the set values to authenticate against Zerostack.
+        INPUTS: self object
+        OUTPUTS: r_dict - zs_token
+                        - zs_token_scope
+        ACCESS: All user accounts
+        NOTE: Domain and project scoped tokens will not allow access to the same resources
+        """
+        body = None
+
+        if(self.rest.token_scope == 'project'):
+            body = '{"auth":{"identity":{"methods":["password"],"password":{"user":{"name":"%s","domain":{"name":"%s"},"password":"%s"}}},"scope":{"project":{"name":"%s","domain":{"name":"%s"}}}}}' \
+                    %(self.rest.auth_username,self.rest.project_domain_name,self.rest.auth_password,self.rest.project_name,self.rest.project_domain_name)
+        else:
+            body = '{"auth":{"identity":{"methods":["password"],"password":{"user":{"domain":{"name":"%s"},"name":"%s","password":"%s"}}},"scope":{"domain":{"name":"%s"}}}}' \
+                   %(self.rest.project_domain_name,self.rest.auth_username,self.rest.auth_password,self.rest.project_domain_name)
+
+        headers={"content-type":"application/json"}
+
+        self.raw_token_body = self.rest.run_rest({'body':body,'headers':headers,'verify':True,'url':self.rest.auth_url+'/auth/tokens','verb':'POST'})
+
+        return {'zs_token_scope':self.rest.token_scope,'zs_token':self.raw_token_body.headers.get('X-Subject-Token')}
+
+    def logout(self,zs_token=None):
+        """
+        DESC: Set the values for Authentication
+        INPUTS: self object
+                zs_token
+        OUTPUTS: r_dict - status
+        ACCESS: All user accounts
+        NOTE: Domain and project scoped tokens will not allow access to the same resources
+        """
+        try:
+            logout = requests.delete(self.auth_url,verify = False,data = body,headers={"content-type":"application/json"})
+        except requests.exceptions.HTTPError as e:
+            raise(e)
+
+        return {'status':logout.status_code}
+
+    def get_raw_zstoken_contents(self):
+        """
+        DESC: Get the full output of the token generation. This will include user info, endpoints, and domains.
+        INPUTS: self object
+        OUTPUTS: raw token object that needs to be processed
+        ACCESS: All user accounts
+        NOTE: This is an object which will be composed of lists of dictionaries.
+        """
+        return self.raw_token_body.text
+
+    def get_zsproject(self):
+        """
+        DESC: Get the project ID and project Name.
+        INPUTS: self object
+        OUTPUTS: r_dict - project_name
+                        - project_id
+        ACCESS: All user accounts
+        NOTE: Will return None if a domain token is used.
+        """
+        raw_contents = json.loads(self.get_raw_zstoken_contents())
+
+        if(self.rest.token_scope == 'project'):
+            self.project_id = raw_contents['token']['project']['id']
+            self.project_name = raw_contents['token']['project']['name']
+        else:
+            self.project_id = None
+            self.project_name = None
+
+        return {'project_name':self.project_name,'project_id':self.project_id}
+
+    def get_zsproject_id(self):
+        """
+        DESC: Return the project ID.
+        INPUTS: self object
+        OUTPUTS: project id
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        if(self.rest.token_scope == 'domain'):
+            return 'WARN: Domain scope token can not return project ID.'
+        raw = self.get_zsproject()
+        return raw['project_id']
+
+    def get_zsdomain(self):
+        """
+        DESC: Set the values for Authentication
+        INPUTS: self object
+        OUTPUTS: r_dict - domain_name
+                        - domain_id
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        raw_contents = json.loads(self.get_raw_zstoken_contents())
+
+        if(self.rest.token_scope == 'project'):
+            self.domain_id = raw_contents['token']['project']['domain']['id']
+            self.domain_name = raw_contents['token']['project']['domain']['name']
+        else:
+            self.domain_id = raw_contents['token']['user']['domain']['id']
+            self.domain_name = raw_contents['token']['user']['domain']['name']
+
+        return {'domain_name':self.domain_name,'domain_id':self.domain_id}
+
+    def get_zsbu_id(self):
+        """
+        DESC: Return the domain ID of the token.
+        INPUTS: self object
+        OUTPUTS: domain id
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        raw = self.get_zsdomain()
+        return raw['domain_id']
+
+    def get_raw_zscatalog(self):
+        """
+        DESC: Get the raw service catalog output.
+        INPUTS: self object
+        OUTPUTS: Raw catalog list data structure.
+        ACCESS: All user accounts
+        NOTE: Output is a list of dictionaries.
+        """
+        raw_contents = json.loads(self.get_raw_zstoken_contents())
+        return raw_contents['token']['catalog']
+
+    def get_zstoken_owner(self):
+        """
+        DESC: Get the user ID and Roles of the Token Owner
+        INPUTS: self object
+        OUTPUTS: r_dict - user_name
+                        - user_id
+                        - roles list - role_name
+                                     - role_id
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        raw_contents = json.loads(self.get_raw_zstoken_contents())
+
+        if(self.rest.token_scope == 'project'):
+            self.user_id = raw_contents['token']['user']['id']
+            self.user_name = raw_contents['token']['user']['name']
+            self.roles = raw_contents['token']['roles']
+        else:
+            self.user_id = raw_contents['token']['user']['id']
+            self.user_name = raw_contents['token']['user']['name']
+            self.roles = raw_contents['token']['roles']
+
+        return {'user_id':self.user_id,'user_name':self.user_name,'roles':self.roles}
+
+    def list_zs_services(self):
+        """
+        DESC: Return a list of cloud service endpoints types in the Zerostack cloud.
+        INPUTS: self object
+        OUTPUTS: list of dictionaries
+                 dict - endpoint_name
+                      - endpoint_id
+                      - endpoint_type
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        raw_endpoints = self.get_raw_zscatalog()
+        r_list = []
+        for endpoint in raw_endpoints:
+            r_list.append({'endpoint_name':endpoint['name'],'endpoint_id':endpoint['id'],'endpoint_type':endpoint['type']})
+        return r_list
+
+    def get_zs_endpoint(self,endpoint_id=None):
+        """
+        DESC: Get detailed endpoint information
+        INPUTS: self object
+                endpoint_id
+        OUTPUTS:
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        if(endpoint_id == None):
+            raise "Error: No endpoint ID given."
+        catalog = self.get_raw_zscatalog()
+        return (item for item in catalog if item["id"] == endpoint_id).next()
+
+class ZS_Identity(object):
+    def __init__(self, zsauth=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        #if nothing is passed error
+        if(zsauth == None):
+            raise Exception("ERROR: zsauth is blank, make sure the object is passed in. CLASS: ZS_Identity")
+
+        #if no object is passed in.
+        if(isinstance(zsauth,dict)):
+            self.zsauth = ZS_Auth(input_dict)
+        else:
+            #get the authentication token and scope
+            self.zsauth = zsauth
+
+        self.token = self.zsauth.authenticate()
+
+    def get_zsbusiness_unit(self,bu_id=None):
+        """
+        DESC: Get detailed BU information.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE:
+
+        #return self.zsauth.authenticate()
+        """
+
+        #print self.zsauth.list_zs_services()
+
+        #if(self.zsauth.rest.token_scope == 'domain'):
+        headers = {"content-type":"application/json","X-Auth-Token":self.token['zs_token']}
+        raw_bu = self.rest.run_rest({'body':None,
+                                            'headers':headers,
+                                            'verify':True,
+                                            'url':self.zsauth.rest.auth_url+'/domains/'+bu_id,
+                                            'verb':'GET'})
+        return raw_bu
+
+    def create_zsbusiness_unit(self,input_dict):
+        """
+        DESC: Create a new business unit in zerostack
+        INPUTS: self object
+                input_dict - bu_name - Req - name of BU
+                           - bu_description - Req - Description of a BU
+                           - ldapSet - Optional - false/true
+        OUTPUTS: r_dict -
+                        -
+        ACCESS: Cloud admins
+        NOTE: MUST have valid cloud admin rc file and zs_token in order to perform this operation. Check OS_PROJECT_DOMAIN_NAME=admin.local
+
+        """
+        if('bu_name' not in input_dict or 'bu_description' not in input_dict):
+            raise Exception("Domain creation values values not given.")
+
+        if('ldapSet' not in input_dict):
+            input_dict['ldapSet'] = 'false'
+
+        ldap_vals = ['true','false']
+        if(str(input_dict['ldapSet']).lower() not in ldap_vals):
+            raise Exception("Domain creation values values not given.")
+
+        body = '{"domain":{"name":"%s","description":"%s","ldapSet":"%s"}}'%(input_dict['bu_name'],input_dict['bu_description'],input_dict['ldapSet'])
+        headers = {"content-type":"application/json;charset=UTF-8","Origin":"https://console.zerostack.com","X-Auth-Token":self.token['zs_token']}
+        raw = self.zsauth.rest.run_rest({'body':body,'headers':headers,'verify':True,'url':self.zsauth.rest.auth_url+'/domains','verb':'POST'})
+
+        return raw
+
+    def delete_business_unit(self,bu_id=None):
+        """
+        DESC: Delete a business unit
+        INPUTS: self object
+                bu_id
+        OUTPUTS: None
+        ACCESS:
+        NOTE: None
+        """
+        #print self.zsauth.list_zs_services()
+        print self.token['zs_token']
+        if(bu_id == None):
+            bu_id = self.zsauth.get_zsbu_id()
+
+        body = '{"enabled":false}'
+        print type(body)
+        headers = {"content-type":"application/json;charset=UTF-8","Origin":"https://console.zerostack.com","X-Auth-Token":self.token['zs_token']}
+        print type(headers)
+
+        print self.zsauth.rest.run_rest({'body':body,
+                                'headers':headers,
+                                'verify':True,
+                                'url':self.zsauth.rest.auth_url+'/domains/'+bu_id,
+                                'verb':'PATCH'})
+
+        raw_bu = self.zsauth.rest.run_rest({'body':None,
+                                            'headers':headers,
+                                            'verify':True,
+                                            'url':self.zsauth.rest.auth_url+'/domains/'+bu_id,
+                                            'verb':'DELETE'})
+        return raw_bu
+
+######################################################
+
+    def create_zsproject(self):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+    def get_zsproject(self,project_id=None):
+        pass
+
+    def list_zsprojects(self,doamin_id=None):
+        """
+        DESC: List the projects in the BU.
+        INPUTS: self object
+                domain_id
+        OUTPUTS: r_list - dict - domain_name
+                               - domain_id
+                               - project_name
+                               - project_id
+        ACCESS: BU admin or cloud admins
+        NOTE: Domain scope token must be used
+        """
+        return "Not implemented."
+
+    def delete_zsproject(self,project_id=None):
+        """
+        DESC: Delete a project.
+        INPUTS: self object
+                project_id - Required
+        OUTPUTS:
+        ACCESS: Admin accounts
+        NOTE: need a valid domain token
+        """
+        return "Not implemented."
+
+
+
+####################################################
+
+    def create_user(self):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        return "Not implemented"
+
+    def delete_user(self):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        return "Not implemented"
+
+    def list_users(self):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        return "Not implemented"
+
+
+    def get_users(self):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        return "Not implemented"
+
+class ZS_Compute(object):
+    def __init__(self, zs_token=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        if(zs_token == None):
+            raise "ERROR: zs_token is blank, check your token."
+
+        self.zs_token = zs_token
+
+        self.rest = ZS_Rest()
+
+    def get_zs_instance(self,instance_id=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        self.rest.run_rest()
+        pass
+
+    def list_zs_instances(self):
+        """
+        DESC: List the instances in the project.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: r_dict - instance_name
+                        - instance_id
+        ACCESS: All user accounts
+        NOTE: You must have a token in the project context in order to list the instances.
+        """
+        #https://console.ZeroStack.com/os/fb08e841-c5bf-472e-b5be-3bebb64b3470/regions/0a3b7f9e-617e-485c-88ce-c8c37775efe4/nova/v2/9a7cd63fa36642318a5de4c3dad01ab8/servers/detail
+        try:
+            self.raw_instance_list = requests.post(self.auth_url,verify = False,data = body,headers={"content-type":"application/json"})
+        except requests.exceptions.HTTPError as e:
+            raise(e)
+
+        return {'zs_token_scope':self.token_scope,'zs_token':self.raw_token_body.headers.get('X-Subject-Token')}
+
+
+    def create_zs_instance(self,input_dict):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+    def delete_zs_instance(self,instance_id=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+
+#########Networking######################
+    def connect_zs_network(self,input_dict):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+    def disconnect_zs_network(self,instance_id=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+
+
+    #def connect_zs_volume(self,input_dict):
+    #    """
+    #    DESC: Set the login token.
+    #    INPUTS: self object
+    #            zs_token - generated from ZS_Auth
+    #    OUTPUTS: None
+    #    ACCESS: All user accounts
+    #    NOTE: None
+    #    """
+    #    pass
+
+    #def disconnect_zs_volume(self,input_dict):
+    #    """
+    #    DESC: Set the login token.
+    #    INPUTS: self object
+    #            zs_token - generated from ZS_Auth
+    #    OUTPUTS: None
+    #    ACCESS: All user accounts
+    #    NOTE: None
+    #    """
+    #    pass
+
+##########instance power################
+    def reboot_zs_instance(self,instance_id=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+    def powercyle_zs_instance(self,input_dict):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+       # power on
+       # power off
+        pass
+
+#############instance DR############33
+    def snapshot_zs_instance(self,instance_id=None):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+    def delete_zs_instance_snapshot(self):
+        pass
+
+    def clone_zs_instance(self):
+        pass
+
+class ZS_Network(object):
+    _client = None
+    _project_id = None
+    #Ex. Instructer usees IP tabels to configure a gateway - one side on internet other side 2 subnets on the other side. Build out  avirtual tree network
+    #had this working before queens, set up vm with 3 nics, tell each nic what ip to use,
+
+    def __init__(self, zs_connection):
+        self.zs_net_mgr = zs_connection
+
+    def client(self):
+        pass
+
+    def set_client(self, client):
+        self._client = client
+
+    def set_project_id(self, project_id):
+        self._project_id = project_id
+
+    def router_list(self):
+        return filter(self._owned_resource,
+                      self._client().list_routers()['routers'])
+
+    def router_interfaces_list(self, router):
+        return self._client.list_ports(device_id=router['id'])['ports']
+
+    def port_list(self):
+        return self.client().list_ports()['ports']
+
+    def network_list(self):
+        return filter(self._owned_resource,
+                      self.client().list_networks()['networks'])
+
+    def secgroup_list(self):
+        return filter(self._owned_resource,
+                      self.client().list_security_groups()['security_groups'])
+
+    def floatingip_list(self):
+        return filter(self._owned_resource,
+                      self.client().list_floatingips()['floatingips'])
+
+    def subnet_list(self):
+        return filter(self._owned_resource,
+                      self.client().list_subnets()['subnets'])
+
+    def _owned_resource(self, res):
+        # Only considering resources owned by project
+        return res['tenant_id'] == self._project_id
+
+class ZS_Storage(object):
+    def create_zs_volume():
+        pass
+
+    def list_zs_volumes():
+        pass
+
+    def get_zs_volume():
+        pass
+
+    def delete_zs_volume():
+        pass
+
+    def attach_zs_volume():
+        pass
+
+    def detach_zs_volume():
+        pass
+
+    def snapshot_zs_volume():
+        pass
+
+    def list_zs_volume_snapshots():
+        pass
+
+    def get_zs_volume_snapshot():
+        pass
+
+    def delete_zs_snapshot():
+        pass
+
+class ZS_ObjectStorage(object):
+    pass
+
+class ZS_Apps(object):
+    def list_apps():
+        pass
+    def get_app():
+        pass
+    def deploy_app():
+        pass
+    def upload_app_template():
+        pass
+    def delete_app():
+        pass
+
+class ZS_DNS(object):
+    pass
+
+class ZS_Image(object):
+    pass
+
+class ZS_Hosts(object):
+    pass

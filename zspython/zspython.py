@@ -803,7 +803,7 @@ class ZS_Compute(object):
                 zs_token - generated from ZS_Auth
         OUTPUTS: None
         ACCESS: All user accounts
-        NOTE: None
+        NOTE: Run time scripts are place in user data field and encoded base64
         """
         pass
 
