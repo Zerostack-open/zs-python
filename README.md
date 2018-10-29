@@ -1,14 +1,188 @@
-# Zerostack Python SDK
-Zerostack python library used to easily automate tasks in the Zerostack platform.
+ZeroStack Python SDK v0.1 Beta
 
-## System requierments.
-1. Python 2.7/3.5 - Tested with 2.7 not with 3.5 but should work.
-2. Zerostack RC file
-3. Zerostack key file
-4. Valid Zerostack account
+Python SDK library for interacting with ZeroStack Cloud Operating System API
 
-## How to use
-import zspython
+[![pypy](https://img.shields.io/pypi/v/solidfire-sdk-python.svg)](https://badge.fury.io/py/solidfire-sdk-python)
+[![python](https://img.shields.io/pypi/pyversions/solidfire-sdk-python.svg)](https://pypi.python.org/pypi/solidfire-sdk-python/)
+[![format](https://img.shields.io/pypi/format/solidfire-sdk-python.svg)](https://pypi.python.org/pypi/solidfire-sdk-python/)
+[![downloads](https://img.shields.io/pypi/dm/solidfire-sdk-python.svg)](https://pypi.python.org/pypi/solidfire-sdk-python/#downloads)
+[![license](https://img.shields.io/pypi/l/solidfire-sdk-python.svg)](https://pypi.python.org/pypi/solidfire-sdk-python/)
+
+Description
+-----------
+
+The ZeroStack ZSPython SDK is a library that will help developers and datacenter engineers
+integrate with, and automate the ZeroStack cloud platform. The ZSPython SDK seamlessly integrate 
+with the ZeroStack Cloud Platform using the Python language. The ZSPython library is imported
+like any other Python library and reduces the time to value of the ZeroStack cloud platform.
+
+Compatibility
+-------------
+
+|  Component    | Version       |
+|:--------------|:--------------|
+| ZCOS Star     | 3.0 - 3.0.x   |
+|:--------------|:--------------|
+| ZCOS Sky.     | 26.x - 27.x   |    
+
+Getting Help
+------------
+
+If you have any questions or comments about this product, open an issue
+on our [GitHub repo](https://github.com/solidfire/solidfire-sdk-python)
+or reach out to the online developer community at
+[ThePub](http://netapp.io). Your feedback helps us focus our efforts on
+new features and capabilities.
+
+Documentation
+-------------
+
+[Latest Docs](http://solidfire-sdk-python.readthedocs.io)
+
+[Release
+Notes](https://github.com/solidfire/solidfire-sdk-python/blob/master/NetApp_SolidFire_Python_SDK_Release_Notes.pdf)
 
 
-## Functions
+Installation
+------------
+
+**From PyPI**
+
+    pip install zspython-sdk
+
+**From Source**
+
+*Note*: It is recommended using
+[virtualenv](https://github.com/pypa/virtualenv) for isolating the
+python environment to only the required libraries.
+
+Alternatively, for development purposes or to inspect the source, the
+following will work:
+
+    git clone git@github.com:solidfire/solidfire-sdk-python.git  
+    cd zspython
+    git checkout develop
+    pip install -e ".[dev, test, docs, release]"
+    python setup.py install
+
+Then append the location of this directory to the `PYTHONPATH`
+environment variable to use the SDK in other python scripts:
+
+    export PYTHONPATH=$PYTHONPATH:/path/to/sf-python-sdk/
+
+That's it -- you are ready to start interacting with your SolidFire
+cluster using Python!
+
+Videos
+------
+
+**Getting Started**
+
+[This video](https://www.youtube.com/watch?v=3g028LYmiN4) is a walkthrough of getting started with the SolidFire Python
+SDK. You will see how install the SDK, connect to a SolidFire cluster,
+and use it to perform simple operations like retrieving and modifying
+accounts and volumes.
+
+Examples
+--------
+
+### Step 1 - Build an [Element](http://solidfire-sdk-python.readthedocs.io/en/latest/solidfire.html#solidfire.Element) object using the factory
+
+This is the preferred way to construct the
+[Element](http://solidfire-sdk-python.readthedocs.io/en/latest/solidfire.html#solidfire.Element)
+object. The factory will make a call to the SolidFire cluster using the
+credentials supplied to test the connection. It will also set the
+version to communicate with based on the highest number supported by the
+SDK and Element OS. Optionally, you can choose to set the version
+manually and whether or not to verify SSL. Read more about it in the
+[ElementFactory](http://solidfire-sdk-python.readthedocs.io/en/latest/solidfire.html#solidfire.factory.ElementFactory)
+documentation.
+
+	from solidfire.factory import ElementFactory
+
+	# Use ElementFactory to get a SolidFireElement object.
+	sfe = ElementFactory.create("ip-address-of-cluster", "username", "password")
+
+### Step 2 - Call the API method and retrieve the result
+
+All service methods in SolidFireElement call API endpoints and they all
+return result objects. The naming convention is [method\_name]\_result.
+For example, list\_accounts returns a list\_accounts\_result object
+which has a property called accounts that can be iterated.
+
+This example sends a request to list accounts then pulls the first
+account from the add\_account\_result object.
+
+
+	# Send the request and wait for the result then pull the AccountID
+	list_accounts_result = sfe.list_accounts()
+	account = list_accounts_result.accounts[0];   
+
+
+### More examples using the Python SDK
+
+	from solidfire.factory import ElementFactory
+
+	# Create connection to SF Cluster
+	sfe = ElementFactory.create("ip-address-of-cluster", "username", "password")
+
+	# --------- EXAMPLE 1 - CREATE AN ACCOUNT -----------
+	# Send the request with required parameters and gather the result
+	add_account_result = sfe.add_account(username="example-account")
+	# Pull the account ID from the result object
+	account_id = add_account_result.account_id
+
+	# --------- EXAMPLE 2 - CREATE A VOLUME -------------
+	# Send the request with required parameters and gather the result
+	create_volume_result = sfe.create_volume(name="example-volume",
+	                                         account_id=account_id,
+	                                         total_size=1000000000,
+	                                         enable512e=False)
+	# Pull the VolumeID off the result object
+	volume_id = create_volume_result.volume_id
+
+	# --------- EXAMPLE 3 - LIST ONE VOLUME FOR AN ACCOUNT -------------
+	# Send the request with desired parameters and pull the first volume in the
+	# result
+	volume = sfe.list_volumes(accounts=[account_id], limit=1).volumes[0]
+	# pull the iqn from the volume
+	iqn = volume.iqn
+
+	# --------- EXAMPLE 3 - MODIFY A VOLUME -------------
+	# Send the request with the desired parameters
+	sfe.modify_volume(volume_id=volume_id, total_size=2000000000)
+
+More Examples
+-------------
+
+More specific examples are available
+[here](https://github.com/solidfire/solidfire-sdk-python/blob/master/examples/examples.rst)
+
+Logging
+-------
+
+To configure logging responses, execute the following:
+
+	import logging
+	from solidfire import common
+	common.setLogLevel(logging.DEBUG)
+
+To access the logger for the Element instance:
+
+	from solidfire.common import LOG
+
+Timeouts
+--------
+
+Connection timeout (useful for failing fast when a host becomes
+unreachable):
+
+	from solidfire.factory import ElementFactory
+	sfe = ElementFactory.create("ip-address-of-cluster", "username", "password")
+	sfe.timeout(600)
+
+Read timeout (useful for extending time for a service call to return):
+
+	from solidfire.factory import ElementFactory
+	sfe = ElementFactory.create("ip-address-of-cluster", "username", "password")
+	sfe.read_timeout(600)

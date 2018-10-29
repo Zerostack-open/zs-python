@@ -123,10 +123,6 @@ class ZS_Rest(object):
         else:
             raise Exception("ERROR: API URL is mal formed.")
 
-        print self.url
-        print type(self.url)
-        print self.body
-        print type(self.body)
         r = requests.request(str(input_dict['verb']).upper(), verify=self.verify, headers=self.headers, url=self.url, data=self.body)
         out = r.raise_for_status()
         if(out != None):
@@ -215,7 +211,7 @@ class Zerostack(object):
         ACCESS: All user accounts
         NOTE: Will return None if a domain token is used.
         """
-        raw_contents = json.loads(get_raw_zstoken_contents())
+        raw_contents = json.loads(self.get_raw_zstoken_contents())
 
         if(self.rest.token_scope == 'project'):
             self.project_id = raw_contents['token']['project']['id']
@@ -238,7 +234,7 @@ class Zerostack(object):
             return 'WARN: Domain scope token can not return project ID.'
         raw = self.get_zsproject()
 
-        return {'zs_project_id':raw['project_id']}
+        return {'zs_project_id':raw['zs_project_id']}
 
     def get_zs_bu(self):
         """
@@ -298,10 +294,10 @@ class Zerostack(object):
         """
         DESC: Get the user ID and Roles of the Token Owner
         INPUTS: self object
-        OUTPUTS: r_dict - user_name
-                        - user_id
-                        - roles list - role_name
-                                     - role_id
+        OUTPUTS: r_dict - zs_user_name
+                        - zs_user_id
+                        - zs_roles list - role_name
+                                        - role_id
         ACCESS: All user accounts
         NOTE: None
         """
@@ -316,7 +312,7 @@ class Zerostack(object):
             self.user_name = raw_contents['token']['user']['name']
             self.roles = raw_contents['token']['roles']
 
-        return {'user_id':self.user_id,'user_name':self.user_name,'roles':self.roles}
+        return {'zs_user_id':self.user_id,'zs_user_name':self.user_name,'zs_roles':self.roles}
 
     def list_zs_services(self):
         """
@@ -362,8 +358,14 @@ class Zerostack(object):
         ACCESS: Cloud admins
         NOTE: MUST have valid cloud admin rc file and zs_token in order to perform this operation. Check OS_PROJECT_DOMAIN_NAME=admin.local
         """
-        if('bu_name' not in input_dict or 'bu_description' not in input_dict):
-            raise Exception("Domain creation values values not given.")
+        if(self.rest.token_scope == 'project'):
+            return 'Can not create business unit with project scope token.'
+
+        if('bu_name' not in input_dict):
+            raise Exception("BU name not given.")
+
+        if('bu_description' not in input_dict):
+            raise Exception("BU Description not given.")
 
         if('ldapSet' not in input_dict):
             input_dict['ldapSet'] = 'false'
@@ -372,7 +374,7 @@ class Zerostack(object):
         if(str(input_dict['ldapSet']).lower() not in ldap_vals):
             raise Exception("Domain creation values values not given.")
 
-        body = '{"domain":{"name":"%s","description":"%s","ldapSet":"%s"}}'%(input_dict['bu_name'],input_dict['bu_description'],input_dict['ldapSet'])
+        body = '{"domain":{"name":"%s","description":"%s","ldapSet":%s}}'%(input_dict['bu_name'],input_dict['bu_description'],input_dict['ldapSet'])
         headers = {"content-type":"application/json;charset=UTF-8",
                    "Origin":"https://console.zerostack.com",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
@@ -394,6 +396,9 @@ class Zerostack(object):
         ACCESS: cloud admin
         NOTE:
         """
+        if(self.rest.token_scope == 'project'):
+            return 'Can not list ZS bu with project scope token.'
+
         headers = {"content-type":"application/json",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
         out_array = []
@@ -407,9 +412,10 @@ class Zerostack(object):
             out = json.loads(raw_bu.text)
             for o in out['domains']:
                 out_array.append({'zs_bu_id':o['id'],'zs_bu_name':o['name'],'zs_bu_desc':o['description']})
-            return out_array
         except Exception as e:
             return e
+
+        return out_array
 
     def get_zsbusiness_unit(self,bu_id=None):
         """
@@ -423,11 +429,16 @@ class Zerostack(object):
         NOTE:
         #return self.zsauth.authenticate()
         """
+        if(self.rest.token_scope == 'project'):
+            return 'Can not get ZS bu details with project scope token.'
+
+        if(bu_id == None):
+            b = self.get_zsbu_id()
+            bu_id = b['zs_bu_id']
+
         #print self.zsauth.list_zs_services()
         headers = {"content-type":"application/json",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
-
-        #bu_project =
 
         try:
             raw_bu = self.rest.run_rest({'body':None,
@@ -436,9 +447,10 @@ class Zerostack(object):
                                         'url':self.rest.auth_url+'/domains/'+bu_id,
                                         'verb':'GET'})
             out = json.loads(raw_bu.text)
-            return {'zs_bu_id':out['domain']['id'],'zs_bu_name':out['domain']['name'],'zs_bu_desc':out['domain']['description']}
         except Exception as e:
             return e
+
+        return {'zs_bu_id':out['domain']['id'],'zs_bu_name':out['domain']['name'],'zs_bu_desc':out['domain']['description']}
 
     def delete_zsbusiness_unit(self,bu_id=None):
         """
@@ -451,6 +463,9 @@ class Zerostack(object):
         ACCESS: Cloud admins
         NOTE: None
         """
+        if(self.rest.token_scope == 'project'):
+            return 'Can not delete ZS bu with project scope token.'
+
         body = '{"domain":{"enabled":false}}'
         headers = {"content-type":"application/json;charset=UTF-8",
                    "Origin":"https://console.zerostack.com",
@@ -478,18 +493,17 @@ class Zerostack(object):
         return {'zs_bu_id':zsbu_up['domain']['id'],'zs_bu_name':zsbu_up['domain']['name'],'zs_bu_deleted':True}
 
 #######BU Projects CRUD################
-
     def create_zsproject(self,input_dict):
         """
         DESC: Create a new project in the Zerostack business unit.
         INPUTS: self object
-                description - op
+                description - req
                 zs_bu_id - req
                 project_name - req
                 finite_duration - true/false - op
                 duration - if finite duration specified, default 1 week - op
                 quota_Level - small,medium,large,custom - default medium
-                custom_quota - op - json formated string, see NOTE
+                custom_quota - op - json formatted string, see NOTE
         OUTPUTS: zs_proj_id
         ACCESS: Cloud admin
                 BU admin - domain token needed.
@@ -499,6 +513,9 @@ class Zerostack(object):
                  "network_quota":{"subnet":-1,"router":INT,"port":-1,"network":INT,"floatingip":INT,"vip":-1,"pool":-1} \
                 }'
         """
+        if(self.rest.token_scope == 'project'):
+            return 'Can not create project with project scope token.'
+
         region_id = self.get_zs_region_id()
         url = 'https://console.zerostack.com/v2/clusters/%s/projects'%(region_id['zs_region_id'])
 
@@ -509,24 +526,23 @@ class Zerostack(object):
         #if(str(input_dict['finite_duration']).lower() == 'true'):
             #comeing soon
         #    pass
-
         #this is the defualt
-        quota = '{"compute_quota":{"cores":64,"floating_ips":32,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":32,"key_pairs":-1,"metadata_items":-1,"ram":131072},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":320,"volumes":320,"gigabytes":1280},"network_quota":{"subnet":-1,"router":20,"port":-1,"network":32,"floatingip":32,"vip":-1,"pool":-1}}'
+        quota = '{"compute_quota":{"cores":64,"floating_ips":32,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":32,"key_pairs":-1,"metadata_items":-1,"ram":131072},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":320,"volumes":320,"gigabytes":1280},"network_quota":{"subnet":-1,"router":20,"port":-1,"network":32,"floatingip":32,"vip":-1,"pool":-1}}}'
         template = 'Medium'
         custom_temp = 'true'
 
         if('quota_level' in input_dict and input_dict['quota_level'] == 'small'):
-            quota = '''{"compute_quota":{"cores":16,"floating_ips":8,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":8,"key_pairs":-1,"metadata_items":-1,"ram":32768},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":80,"volumes":80,"gigabytes":320},"network_quota":{"subnet":-1,"router":10,"port":-1,"network":10,"floatingip":8,"vip":-1,"pool":-1}}'''
+            quota = '{"compute_quota":{"cores":16,"floating_ips":8,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":8,"key_pairs":-1,"metadata_items":-1,"ram":32768},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":80,"volumes":80,"gigabytes":320},"network_quota":{"subnet":-1,"router":10,"port":-1,"network":10,"floatingip":8,"vip":-1,"pool":-1}}}'
             template = 'Small'
             custom_temp = 'true'
 
         elif('quota_level' in input_dict and input_dict['quota_level'] == 'medium'):
-            quota = '''{"compute_quota":{"cores":64,"floating_ips":32,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":32,"key_pairs":-1,"metadata_items":-1,"ram":131072},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":320,"volumes":320,"gigabytes":1280},"network_quota":{"subnet":-1,"router":20,"port":-1,"network":32,"floatingip":32,"vip":-1,"pool":-1}}'''
+            quota = '{"compute_quota":{"cores":64,"floating_ips":32,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":32,"key_pairs":-1,"metadata_items":-1,"ram":131072},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":320,"volumes":320,"gigabytes":1280},"network_quota":{"subnet":-1,"router":20,"port":-1,"network":32,"floatingip":32,"vip":-1,"pool":-1}}}'
             template = 'Medium'
             custom_temp = 'true'
 
         elif('quota_level' in input_dict and input_dict['quota_level'] == 'large'):
-            quota = '{"compute_quota":{"cores":128,"floating_ips":64,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":64,"key_pairs":-1,"metadata_items":-1,"ram":262144},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":640,"volumes":640,"gigabytes":25600},"network_quota":{"subnet":-1,"router":20,"port":-1,"network":64,"floatingip":64,"vip":-1,"pool":-1}}'
+            quota = '{"compute_quota":{"cores":128,"floating_ips":64,"injected_file_content_bytes":-1,"injected_file_path_bytes":-1,"injected_files":-1,"instances":64,"key_pairs":-1,"metadata_items":-1,"ram":262144},"storage_quota":{"backup_gigabytes":-1,"backups":-1,"snapshots":640,"volumes":640,"gigabytes":25600},"network_quota":{"subnet":-1,"router":20,"port":-1,"network":64,"floatingip":64,"vip":-1,"pool":-1}}}'
             template = 'Large'
             custom_temp = 'true'
 
@@ -535,38 +551,79 @@ class Zerostack(object):
             template = 'Custom'
             custom_temp = 'true'
 
-        body = '{"description":"%s","domain_id":"%s","name":"%s","finite_duration":"%s","metadata":{"templateId":"%s","custom_template":"%s"},"quota":"%s"'%(input_dict['description'],
+        body = '{"description":"%s","domain_id":"%s","name":"%s","finite_duration":%s,"metadata":{"templateId":"%s","custom_template":"%s"},"quota":%s'%(input_dict['description'],
                                                                                                                                                              input_dict['zs_bu_id'],
                                                                                                                                                              input_dict['project_name'],
-                                                                                                                                                             str(input_dict['finite_duration']).lower(),
-                                                                                                                                                             template,custom_temp,quota)
+                                                                                                                                                             str(input_dict['finite_duration']),
+                                                                                                                                                             template,
+                                                                                                                                                             custom_temp,
+                                                                                                                                                             quota)
         headers = {"content-type":"application/json;charset=UTF-8",
                    "Origin":"https://console.zerostack.com",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
-        #try:
-        raw_bu = self.rest.run_rest({'body':body,
-                                    'headers':headers,
-                                    'verify':True,
-                                    'url':url,
-                                    'verb':'POST'})
-        out = json.loads(raw_bu.text)
-        #except Exception as e:
-        #    return e
+        try:
+            raw_proj = self.rest.run_rest({'body':body,
+                                            'headers':headers,
+                                            'verify':True,
+                                            'url':url,
+                                            'verb':'POST'})
+            out = json.loads(raw_proj.text)
+        except Exception as e:
+            return e
 
-        return out
+        return {'zs_project_id':out['id']}
 
 
-    def get_zsproject(self,project_id=None):
+    def get_zsproject_details(self,project_id=None):
         """
         DESC: Get project details
         INPUTS: self object
-                zs_token - generated from ZS_Auth
-        OUTPUTS: None
+                project_id - if none defaults to user project - op
+        OUTPUTS: out_dict - created_by
+                          - zs_project_id
+                          - zs_project_name
+                          - zs_project_desc
+                          - zs_bu_name
+                          - zs_bu_id
+                          - zs_storage
+                          - zs_network
+                          - zs_compute
         ACCESS: Cloud admin
-                BU admin - domain token needed.
+                BU admin - domain token needed
+                Project Owner - project token needed
         NOTE: None
         """
-        pass
+        if(project_id == None):
+            p = self.get_zsproject_id()
+            project_id = p['zs_project_id']
+
+        region_id = self.get_zs_region_id()
+        url = 'https://console.zerostack.com/v2/clusters/%s/projects/%s'%(region_id['zs_region_id'],project_id)
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        try:
+            raw_proj = self.rest.run_rest({'body':None,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':url,
+                                        'verb':'GET'})
+            out = json.loads(raw_proj.text)
+        except Exception as e:
+            return e
+
+        return {'created_by':out['acct_id'],
+                'zs_project_name':out['domain_name'],
+                'zs_project_id':out['id'],
+                'zs_project_desc':out['description'],
+                'zs_bu_name':out['domain_name'],
+                'zs_bu_id':out['domain_id'],
+                'zs_storage':out['quota']['storage_quota'],
+                'zs_compute':out['quota']['compute_quota'],
+                'zs_network':out['quota']['network_quota']
+                }
 
     def list_zsprojects(self,bu_id=None):
         """
@@ -581,9 +638,11 @@ class Zerostack(object):
         headers = {"content-type":"application/json;charset=UTF-8",
                    "Origin":"https://console.zerostack.com",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
         if(bu_id == None):
             x = self.get_zsbu_id()
             bu_id = x['zs_bu_id']
+
         try:
             raw_bu = self.rest.run_rest({'body':None,
                                         'headers':headers,
@@ -594,21 +653,48 @@ class Zerostack(object):
         except Exception as e:
             return e
 
-        return {'zs_projects':out['projects']}
+        out = []
+        for project in out['projects']:
+            out.append({'zs_project_name':project['id'],'zs_project_name':project['name']})
+
+        return out
 
     def delete_zsproject(self,project_id=None):
         """
         DESC: Delete a project.
         INPUTS: self object
                 project_id - Required
-        OUTPUTS:
+        OUTPUTS: OK - Success
+                 ERROR on failure
         ACCESS: Cloud admin
                 BU admin - domain token needed.
         NOTE: need a valid domain token
         """
-        return "Not implemented."
+        if(self.rest.token_scope == 'project'):
+            return 'Can not create user with project scope token.'
 
-    def create_user(self,input_dict):
+        region_id = self.get_zs_region_id()
+        url = 'https://console.zerostack.com/v2/clusters/%s/projects/%s'%(region_id['zs_region_id'],project_id)
+
+        body = '{"force":true}'
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        try:
+            raw_bu = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':url,
+                                        'verb':'DELETE'})
+            out = json.loads(raw_bu.text)
+        except Exception as e:
+            return e
+
+        return out['summary']
+
+    #Users
+    def create_zsuser(self,input_dict):
         """
         DESC: Add a new user to a project
         INPUTS: self object
@@ -689,41 +775,115 @@ class Zerostack(object):
 
         return {'zs_user_id':out['user']['id'],'zs_user_name':out['user']['name']}
 
-    def delete_user(self):
+    def delete_zsuser(self,user_id=None):
         """
-        DESC: Set the login token.
+        DESC: Delete a user from the ZeroStack platform.
         INPUTS: self object
-                zs_token - generated from ZS_Auth
-        OUTPUTS: None
-        ACCESS: All user accounts
+                user_id - req
+        OUTPUTS: OK
+                 ERROR
+        ACCESS: Cloud Admin
+                BU Admin
         NOTE: None
         """
-        return "Not implemented"
+        if(user_id == None):
+            return 'ERROR'
 
-    def list_users(self):
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        #create the new user
+        try:
+            raw_user = self.rest.run_rest({'body':None,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.auth_url+'/users/%s'%(user_id),
+                                        'verb':'DELETE'})
+            out = json.loads(raw_user.text)
+        except Exception as e:
+            return e
+
+        return out['summary']
+
+    def list_zsusers(self,bu_id=None):
         """
-        DESC: Set the login token.
+        DESC: List the zs users in the business unit.
         INPUTS: self object
-                zs_token - generated from ZS_Auth
-        OUTPUTS: None
+                zs_bu_id - req
+        OUTPUTS: array of dict - zs_user_id
+                               - zs_user_name
+                               - zs_user_email
+                               - zs_bu_id
         ACCESS: All user accounts
-        NOTE: None
+        NOTE: If the bu id is not given, the bu id assigned to the token will be used.
         """
-        return "Not implemented"
+        if(bu_id == None):
+            x = self.get_zsbu_id()
+            bu_id = x['zs_bu_id']
 
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
 
-    def get_user(self):
+        #create the new user
+        try:
+            raw_user = self.rest.run_rest({'body':None,
+                                           'headers':headers,
+                                           'verify':True,
+                                           'url':self.rest.auth_url+'/users?domain_id=%s'%(bu_id),
+                                           'verb':'GET'})
+            out = json.loads(raw_user.text)
+        except Exception as e:
+            return e
+
+        out_array = []
+        for o in out['users']:
+            out_array.append({'zs_user_id':o['id'],'zs_user_name':o['name'],'zs_user_email':o['email'],'zs_bu_id':o['domain_id']})
+
+        return out
+
+    def get_zsuser(self,user_id=None,bu_id=None):
         """
-        DESC: Set the login token.
+        DESC: Get info on a specific user.
         INPUTS: self object
-                zs_token - generated from ZS_Auth
-        OUTPUTS: None
-        ACCESS: All user accounts
-        NOTE: None
+                user_id
+        OUTPUTS: - zs_user_id
+                 - zs_user_name
+                 - zs_user_email
+                 - zs_bu_id
+        ACCESS: Cloud Admin
+                BU Admin - BU scope
+                project user - personal credentials
+        NOTE:
         """
-        return "Not implemented"
+        if(bu_id == None):
+            x = self.get_zsbu_id()
+            bu_id = x['zs_bu_id']
 
-    def apply_user_role(self):
+        if(user_id == None):
+            x = self.get_zstoken_owner()
+            user_id = x['zs_user_id']
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        #create the new user
+        try:
+            raw_user = self.rest.run_rest({'body':None,
+                                           'headers':headers,
+                                           'verify':True,
+                                           'url':self.rest.auth_url+'/users/%s?domain_id=%s'%(user_id,bu_id),
+                                           'verb':'GET'})
+            out = json.loads(raw_user.text)
+        except Exception as e:
+            return e
+
+        return {'zs_user_id':out['user']['id'],'zs_user_name':out['user']['name'],'zs_user_email':out['user']['email'],'zs_bu_id':out['user']['domain_id']}
+
+    #basic user role operations
+    def apply_zsuser_role(self):
         """
         DESC: Apply a role to a user.
         INPUTS: self object
@@ -733,37 +893,35 @@ class Zerostack(object):
         """
         return "Not implemented"
 
-    def list_user_roles(self):
+    def update_zsuser_role(self):
+        pass
+        #change the user role if needed
+        #Admin->Member
+        #Memeber->Admin
+
+    def list_zsuser_roles(self):
         pass
 
+    def assign_zsuser_to_project(self,input_dict):
+        pass
+        #input_dict = {'user_id',None,'project_id':None}
 
-    def list_apps():
-        pass
-    def get_app():
-        pass
-    def deploy_app():
-        pass
-    def upload_app_template():
-        pass
-    def delete_app():
-        pass
-
-class ZS_Compute(object):
-    def __init__(self, zs_token=None):
+    #Basic instance operations
+    def create_zs_instance(self,input_dict):
         """
-        DESC: Set the login token.
+        DESC: Create an instance in a ZeroStack project.
         INPUTS: self object
-                zs_token - generated from ZS_Auth
-        OUTPUTS: None
+                input_dict -
+        OUTPUTS: vm_id
         ACCESS: All user accounts
-        NOTE: None
+        NOTE:
         """
-        if(zs_token == None):
-            raise "ERROR: zs_token is blank, check your token."
+        pass
 
-        self.zs_token = zs_token
+    def get_zs_instance_status(self):
+        pass
+        #https://console.zerostack.com/v2/clusters/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/vms/1c10a7cf-4665-447a-83e7-edaa1674a1c4
 
-        self.rest = ZS_Rest()
 
     def get_zs_instance(self,instance_id=None):
         """
@@ -795,18 +953,6 @@ class ZS_Compute(object):
 
         return {'zs_token_scope':self.token_scope,'zs_token':self.raw_token_body.headers.get('X-Subject-Token')}
 
-
-    def create_zs_instance(self,input_dict):
-        """
-        DESC: Set the login token.
-        INPUTS: self object
-                zs_token - generated from ZS_Auth
-        OUTPUTS: None
-        ACCESS: All user accounts
-        NOTE: Run time scripts are place in user data field and encoded base64
-        """
-        pass
-
     def delete_zs_instance(self,instance_id=None):
         """
         DESC: Set the login token.
@@ -818,8 +964,6 @@ class ZS_Compute(object):
         """
         pass
 
-
-#########Networking######################
     def connect_zs_network(self,input_dict):
         """
         DESC: Set the login token.
@@ -842,56 +986,82 @@ class ZS_Compute(object):
         """
         pass
 
+    #zs app catalog operations
+    def list_zs_apps():
+        pass
 
+    def get_zs_app():
+        pass
 
-    #def connect_zs_volume(self,input_dict):
-    #    """
-    #    DESC: Set the login token.
-    #    INPUTS: self object
-    #            zs_token - generated from ZS_Auth
-    #    OUTPUTS: None
-    #    ACCESS: All user accounts
-    #    NOTE: None
-    #    """
-    #    pass
+    def deploy_zs_app():
+        pass
 
-    #def disconnect_zs_volume(self,input_dict):
-    #    """
-    #    DESC: Set the login token.
-    #    INPUTS: self object
-    #            zs_token - generated from ZS_Auth
-    #    OUTPUTS: None
-    #    ACCESS: All user accounts
-    #    NOTE: None
-    #    """
-    #    pass
+    def upload_zsapp_template():
+        pass
+
+    def delete_zs_app():
+        pass
+
+    def connect_zs_volume(self,input_dict):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+
+    def disconnect_zs_volume(self,input_dict):
+        """
+        DESC: Set the login token.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
 
 ##########instance power################
-    def reboot_zs_instance(self,instance_id=None):
+    def reboot_zs_instance(self,input_dict):
         """
-        DESC: Set the login token.
+        DESC: Soft reboot a vm.
         INPUTS: self object
-                zs_token - generated from ZS_Auth
+
         OUTPUTS: None
         ACCESS: All user accounts
         NOTE: None
         """
         pass
+        #{'project_id':None,'vm_id':None}
+        #https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2/5673d547c00e4dd1bc48b7a4198ff2b5/servers/1c10a7cf-4665-447a-83e7-edaa1674a1c4/action
+        #body = --data-binary '{"reboot":{"type":"SOFT"}}' --compressed
 
-    def powercyle_zs_instance(self,input_dict):
+    def powercycle_zs_instance(self,input_dict):
         """
-        DESC: Set the login token.
+        DESC: Power on, off, or cycle the power on a vm.
         INPUTS: self object
-                zs_token - generated from ZS_Auth
+                input_dict - power_option - on/off/cycle
+                           - vm_id
+                           - project_id
         OUTPUTS: None
         ACCESS: All user accounts
         NOTE: None
         """
-       # power on
-       # power off
+        #power off
+        #https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2/5673d547c00e4dd1bc48b7a4198ff2b5/servers/1c10a7cf-4665-447a-83e7-edaa1674a1c4/action
+        #body = --data-binary '{"os-stop":null}' --compressed
+
+        #power on
+        #https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2/5673d547c00e4dd1bc48b7a4198ff2b5/servers/1c10a7cf-4665-447a-83e7-edaa1674a1c4/action
+        #body = --data-binary '{"os-start":null}' --compressed
+
+        stats = self.get_zs_instance_status()
         pass
 
-#############instance DR############33
+#############instance DR############
     def snapshot_zs_instance(self,instance_id=None):
         """
         DESC: Set the login token.
@@ -902,21 +1072,27 @@ class ZS_Compute(object):
         NOTE: None
         """
         pass
+        #new cinder volume
+        #curl 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/cinder/v2/5673d547c00e4dd1bc48b7a4198ff2b5/volumes/74bd4610-f3a0-48f4-a3dd-a59cb18eaed4/action'
+        #POST --data-binary '{"os-volume_upload_image":{"container_format":"bare","force":true,"image_name":"jonathan","disk_format":"qcow2"}}' --compressed
+
+        #new glance image
+        #curl 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/glance/v1/images/8be0bd5c-0ed9-4fee-bb6e-c2a922623cc3'
+        #-X PUT -H 'x-image-meta-property-os: ' -H 'X-image-meta-name: jonathan' -H 'X-image-meta-disk_format: qcow2' -H 'x-image-meta-property-source: vm' -H 'x-image-meta-property-tag-change-default-config: true'
+        #-H 'x-image-meta-min_ram: 8192'  -H 'x-image-meta-property-category: vm' -H 'x-image-meta-property-source-name: controller' -H 'X-Image-Meta-Is_public: true' -H 'x-image-meta-property-tag-volume-type: highcap_type'
+        #-H 'Content-Length: 0' -H 'x-image-meta-owner: 5673d547c00e4dd1bc48b7a4198ff2b5' -H 'x-image-meta-min_disk: 30' --compressed
 
     def delete_zs_instance_snapshot(self):
         pass
+        #'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/glance/v2/images/8be0bd5c-0ed9-4fee-bb6e-c2a922623cc3'
+        #-X DELETE
 
-    def clone_zs_instance(self):
+    def list_zs_instance_snapshot(self):
         pass
+        #https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/glance/v2/images?owner=5673d547c00e4dd1bc48b7a4198ff2b5
+        #https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/glance/v2/images?visibility=public
 
-class ZS_Network(object):
-    _client = None
-    _project_id = None
-    #Ex. Instructer usees IP tabels to configure a gateway - one side on internet other side 2 subnets on the other side. Build out  avirtual tree network
-    #had this working before queens, set up vm with 3 nics, tell each nic what ip to use,
-
-    def __init__(self, zs_connection):
-        self.zs_net_mgr = zs_connection
+    ###Network#####
 
     def client(self):
         pass
@@ -957,7 +1133,7 @@ class ZS_Network(object):
         # Only considering resources owned by project
         return res['tenant_id'] == self._project_id
 
-class ZS_Storage(object):
+    ###Storage#####
     def create_zs_volume():
         pass
 
@@ -987,27 +1163,3 @@ class ZS_Storage(object):
 
     def delete_zs_snapshot():
         pass
-
-#class ZS_ObjectStorage(object):
-#    pass
-
-#class ZS_Apps(object):
-#    def list_apps():
-#        pass
-#    def get_app():
-#        pass
-#    def deploy_app():
-#        pass
-#    def upload_app_template():
-#        pass
-#    def delete_app():
-#        pass
-
-#class ZS_DNS(object):
-#    pass
-
-#class ZS_Image(object):
-#    pass
-
-#class ZS_Hosts(object):
-#    pass
