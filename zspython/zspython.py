@@ -226,7 +226,7 @@ class Zerostack(object):
         """
         DESC: Return the project ID.
         INPUTS: self object
-        OUTPUTS: zs_project_id
+        OUTPUTS: out_dict - zs_project_id
         ACCESS: All user accounts
         NOTE: None
         """
@@ -235,6 +235,39 @@ class Zerostack(object):
         raw = self.get_zsproject()
 
         return {'zs_project_id':raw['zs_project_id']}
+
+    def get_cloudadmin_zsproject(self):
+        """
+        DESC: Return the default project ID for the cloud admin.
+        INPUTS: self object
+        OUTPUTS: out_dict - zs_ca_project_id
+        ACCESS: Cloud admins
+        NOTE: get_zs_project() does not return the cloud admin default project id.
+              This id is needed in order to perform most infrastructure tasks. ex. creating a host group.
+        """
+        if(self.rest.token_scope == 'project'):
+            return {'zs_ca_project_id':None}
+
+        bu_id = self.get_zsbu_id()
+        headers = {"content-type":"application/json",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        try:
+            raw_ca = self.rest.run_rest({'body':None,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.auth_url+'/projects?domain_id=%s'%(bu_id['zs_bu_id']),
+                                        'verb':'GET'})
+            out = json.loads(raw_ca.text)
+        except Exception as e:
+            return e
+
+        ca_proj_id = None
+        for proj in out['projects']:
+            if(proj['name'] == 'zs_default'):
+                ca_proj_id = proj['id']
+
+        return {'zs_ca_project_id':ca_proj_id}
 
     def get_zs_bu(self):
         """
@@ -359,7 +392,7 @@ class Zerostack(object):
         NOTE: MUST have valid cloud admin rc file and zs_token in order to perform this operation. Check OS_PROJECT_DOMAIN_NAME=admin.local
         """
         if(self.rest.token_scope == 'project'):
-            return 'Can not create business unit with project scope token.'
+            return {'zs_bu_id':None,'zs_bu_name':None,'zs_bu_desc':None}
 
         if('bu_name' not in input_dict):
             raise Exception("BU name not given.")
@@ -382,9 +415,10 @@ class Zerostack(object):
         try:
             raw = self.rest.run_rest({'body':body,'headers':headers,'verify':True,'url':self.rest.auth_url+'/domains','verb':'POST'})
             out = json.loads(raw.text)
-            return {'zs_bu_id':out['domain']['id'],'zs_bu_name':out['domain']['name'],'zs_bu_desc':out['domain']['description']}
         except Exception as e:
             return e
+
+        return {'zs_bu_id':out['domain']['id'],'zs_bu_name':out['domain']['name'],'zs_bu_desc':out['domain']['description']}
 
     def list_zsbusiness_units(self):
         """
@@ -397,7 +431,7 @@ class Zerostack(object):
         NOTE:
         """
         if(self.rest.token_scope == 'project'):
-            return 'Can not list ZS bu with project scope token.'
+            return [{'zs_bu_id':None,'zs_bu_name':None,'zs_bu_desc':None}]
 
         headers = {"content-type":"application/json",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
@@ -410,8 +444,10 @@ class Zerostack(object):
                                         'url':self.rest.auth_url+'/domains',
                                         'verb':'GET'})
             out = json.loads(raw_bu.text)
+
             for o in out['domains']:
                 out_array.append({'zs_bu_id':o['id'],'zs_bu_name':o['name'],'zs_bu_desc':o['description']})
+
         except Exception as e:
             return e
 
@@ -427,16 +463,14 @@ class Zerostack(object):
                           - zs_bu_desc - Business unit description is any
         ACCESS: cloud admins
         NOTE:
-        #return self.zsauth.authenticate()
         """
-        if(self.rest.token_scope == 'project'):
-            return 'Can not get ZS bu details with project scope token.'
-
         if(bu_id == None):
             b = self.get_zsbu_id()
             bu_id = b['zs_bu_id']
 
-        #print self.zsauth.list_zs_services()
+        if(self.rest.token_scope == 'project'):
+            return {'zs_bu_id':bu_id,'zs_bu_name':None,'zs_bu_desc':None}
+
         headers = {"content-type":"application/json",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
 
@@ -463,8 +497,11 @@ class Zerostack(object):
         ACCESS: Cloud admins
         NOTE: None
         """
+        if(bu_id == None):
+            return {'zs_bu_id':None,'zs_bu_name':None,'zs_bu_deleted':False}
+
         if(self.rest.token_scope == 'project'):
-            return 'Can not delete ZS bu with project scope token.'
+            return {'zs_bu_id':bu_id,'zs_bu_name':None,'zs_bu_deleted':False}
 
         body = '{"domain":{"enabled":false}}'
         headers = {"content-type":"application/json;charset=UTF-8",
@@ -514,7 +551,7 @@ class Zerostack(object):
                 }'
         """
         if(self.rest.token_scope == 'project'):
-            return 'Can not create project with project scope token.'
+            return {'zs_project_id':None}
 
         region_id = self.get_zs_region_id()
         url = 'https://console.zerostack.com/v2/clusters/%s/projects'%(region_id['zs_region_id'])
@@ -635,6 +672,10 @@ class Zerostack(object):
                 BU admin - domain token needed.
         NOTE: Domain scope token must be used
         """
+
+        if(self.rest.token_scope == 'project'):
+            return [{'zs_project_id':None,'zs_project_name':None}]
+
         headers = {"content-type":"application/json;charset=UTF-8",
                    "Origin":"https://console.zerostack.com",
                    "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
@@ -655,7 +696,7 @@ class Zerostack(object):
 
         out = []
         for project in out['projects']:
-            out.append({'zs_project_name':project['id'],'zs_project_name':project['name']})
+            out.append({'zs_project_id':project['id'],'zs_project_name':project['name']})
 
         return out
 
@@ -664,14 +705,14 @@ class Zerostack(object):
         DESC: Delete a project.
         INPUTS: self object
                 project_id - Required
-        OUTPUTS: OK - Success
-                 ERROR on failure
+        OUTPUTS: out_dict - zs_project_id
+                          - zs_project_deleted True/False
         ACCESS: Cloud admin
                 BU admin - domain token needed.
         NOTE: need a valid domain token
         """
         if(self.rest.token_scope == 'project'):
-            return 'Can not create user with project scope token.'
+            return {'zs_project_id':project_id,'zs_project_deleted':False}
 
         region_id = self.get_zs_region_id()
         url = 'https://console.zerostack.com/v2/clusters/%s/projects/%s'%(region_id['zs_region_id'],project_id)
@@ -691,7 +732,299 @@ class Zerostack(object):
         except Exception as e:
             return e
 
-        return out['summary']
+        #return out['summary']
+        return {'zs_project_id':project_id,'zs_project_deleted':True}
+
+    #######Server groups########
+    def list_cluster_zhosts(self):
+        """
+        DESC: List the zhost specs
+        INPUTS: self object
+        OUTPUTS: out_dict - zhost specs
+        ACCESS: Cloud admin
+        NOTE: Only users with a cloud admin token will be able to view physical infrastructure.
+        """
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+        try:
+            raw_inf = self.rest.run_rest({'body':None,
+                                            'headers':headers,
+                                            'verify':True,
+                                            'url':'https://console.zerostack.com/v1/hosts',
+                                            'verb':'GET'})
+            out = json.loads(raw_inf.text)
+        except Exception as e:
+            return e
+
+        return out
+
+    def list_zshost_groups(self):
+        """
+        DESC: List the zhost host groups.
+        INPUTS: self object
+        OUTPUTS: out_dict - zhost_name
+                          - zhost_group_id
+                          - zhosts - array
+        ACCESS: Cloud admin
+        NOTE: Only users with a cloud admin token will be able to list the host groups.
+        """
+        #url = 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2.1/a7a87ccad85f42df9281635a472607ca/os-aggregates'
+
+        project_id = self.get_cloudadmin_zsproject()
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        try:
+            raw_inf = self.rest.run_rest({'body':None,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.zs_url+'/nova/v2.1/%s/os-aggregates'%(project_id['zs_ca_project_id']),
+                                        'verb':'GET'})
+            out = json.loads(raw_inf.text)
+        except Exception as e:
+            return e
+
+        return out
+
+    def create_zshost_group(self):
+        pass
+        #body = --data-binary '{"aggregate":{"name":"highpower","availability_zone":null}}'
+        #url = 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2.1/a7a87ccad85f42df9281635a472607ca/os-aggregates'
+
+        #metadaturl = 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2.1/a7a87ccad85f42df9281635a472607ca/os-aggregates/7/action'
+        #metadatabody = --data-binary '{"set_metadata":{"metadata":{"description":"a high powered host group","value":"highpowered"}}}'
+
+    def add_zhost_to_group(self,input_dict):
+        """
+        DESC: Add a zhost to the zhost group.
+        INPUTS: input_dict - zhost_name
+                           - group_id
+        OUTPUTS:
+        ACCESS: Cloud admin
+        NOTE: Only users with a cloud admin token will be able to list the host groups.
+        """
+        project_id = self.get_cloudadmin_zsproject()
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        body = '{"add_host":{"host":"%s"}}'%(input_dict['zhost_name'])
+
+        try:
+            raw_inf = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.zs_url+'/nova/v2.1/%s/os-aggregates/%s/action'%(project_id['zs_ca_project_id'],input_dict['group_id']),
+                                        'verb':'POST'})
+            out = json.loads(raw_inf.text)
+        except Exception as e:
+            return e
+
+        return out
+
+    def delete_zhost_from_group(self,input_dict):
+        """
+        DESC: Remove a zhost from a zhost group.
+        INPUTS: input_dict - zhost_name
+                           - group_id
+        OUTPUTS:
+        ACCESS: Cloud admin
+        NOTE: Only users with a cloud admin token will be able to list the host groups.
+        """
+        project_id = self.get_cloudadmin_zsproject()
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        body = '{"remove_host":{"host":"%s"}}'%(input_dict['zhost_name'])
+
+        try:
+            raw_inf = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.zs_url+'/nova/v2.1/%s/os-aggregates/%s/action'%(project_id['zs_ca_project_id'],input_dict['group_id']),
+                                        'verb':'POST'})
+            out = json.loads(raw_inf.text)
+        except Exception as e:
+            return e
+
+        return out
+
+    def delete_zhost_group(self):
+        #url = 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2.1/a7a87ccad85f42df9281635a472607ca/os-aggregates/7'
+        """
+        DESC: Delete a zhost group.
+        INPUTS: group_id
+        OUTPUTS:
+        ACCESS: Cloud admin
+        NOTE: Only users with a cloud admin token will be able to delete host groups.
+        """
+        project_id = self.get_cloudadmin_zsproject()
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+
+        try:
+            raw_inf = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.zs_url+'/nova/v2.1/%s/os-aggregates/%s'%(project_id['zs_ca_project_id'],input_dict['group_id']),
+                                        'verb':'DELETE'})
+            out = json.loads(raw_inf.text)
+        except Exception as e:
+            return e
+
+        return out
+
+    #####keypairs###############
+    def create_zskeypair(self,input_dict):
+        """
+        DESC: Create a new keypair in a project.
+        INPUTS: self object
+                input_dict - zs_project_id - req
+                           - zs_key_name - req
+        OUTPUTS: out_dict - zs_public_key
+                          - zs_key_name
+        ACCESS: Any user with a project scope token
+        NOTE: If the user does not have a project scope one will be
+              created for the purpose of createing the key pair.
+        """
+        token_scope = self.rest.token_scope
+        project_key_token = self.raw_token_body.headers.get('X-Subject-Token')
+
+        if(token_scope != 'project'):
+            headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+            body = '{"auth":{"scope":{"project":{"id":"%s"}},"identity":{"methods":["token"],"token":{"id":"%s"}}}}'%(input_dict['zs_project_id'],self.raw_token_body.headers.get('X-Subject-Token'))
+
+            try:
+                raw_key_token = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.auth_url+'/auth/tokens',
+                                        'verb':'POST'})
+                project_key_token = raw_key_token.headers.get('X-Subject-Token')
+            except Exception as e:
+                return e
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":project_key_token}
+        body = '{"keypair":{"name":"%s"}}'%(input_dict['zs_key_name'])
+
+        try:
+            raw_key = self.rest.run_rest({'body':body,
+                                    'headers':headers,
+                                    'verify':True,
+                                    'url':self.rest.zs_url+"/nova/v2/%s/os-keypairs"%(input_dict['zs_project_id']),
+                                    'verb':'POST'})
+            keyinfo = json.loads(raw_key.text.encode('latin-1'))
+        except Exception as e:
+            return e
+
+        return {'zs_public_key':keyinfo['keypair']['public_key'],'zs_key_name':keyinfo['keypair']['name']}
+
+    def delete_zskeypair(self,input_dict):
+        """
+        DESC: Delete an exisiting keypair in a project.
+        INPUTS: self object
+                input_dict - zs_key_name - req
+                           - zs_project_id - req
+        OUTPUTS: OK
+                 ERROR
+        ACCESS: Any user with a project scope token
+        NOTE: If the user does not have a project scope one will be
+              created for the purpose of createing the key pair.
+        """
+        token_scope = self.rest.token_scope
+        project_key_token = self.raw_token_body.headers.get('X-Subject-Token')
+
+        if(token_scope != 'project'):
+            headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+            body = '{"auth":{"scope":{"project":{"id":"%s"}},"identity":{"methods":["token"],"token":{"id":"%s"}}}}'%(input_dict['zs_project_id'],self.raw_token_body.headers.get('X-Subject-Token'))
+
+            try:
+                raw_key_token = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.auth_url+'/auth/tokens',
+                                        'verb':'POST'})
+                project_key_token = raw_key_token.headers.get('X-Subject-Token')
+            except Exception as e:
+                return e
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":project_key_token}
+
+        try:
+            raw_key = self.rest.run_rest({'body':None,
+                                    'headers':headers,
+                                    'verify':True,
+                                    'url':self.rest.zs_url+"/nova/v2/%s/os-keypairs/%s"%(input_dict['zs_project_id'],input_dict['zs_key_name']),
+                                    'verb':'DELETE'})
+        except Exception as e:
+            return e
+
+        return 'OK'
+
+    def list_zskeypairs(self,zs_project_id=None):
+        """
+        DESC: Liat the keypairs in a project.
+        INPUTS: self object
+        OUTPUTS: out_dict - zs_public_key
+                          - zs_key_name
+        ACCESS: Any user with a project scope token
+        NOTE: If the user does not have a project scope one will be
+              created for the purpose of createing the key pair.
+        """
+        token_scope = self.rest.token_scope
+        project_key_token = self.raw_token_body.headers.get('X-Subject-Token')
+
+        if(token_scope != 'project'):
+            headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+            body = '{"auth":{"scope":{"project":{"id":"%s"}},"identity":{"methods":["token"],"token":{"id":"%s"}}}}'%(zs_project_id,self.raw_token_body.headers.get('X-Subject-Token'))
+
+            try:
+                raw_key_token = self.rest.run_rest({'body':body,
+                                        'headers':headers,
+                                        'verify':True,
+                                        'url':self.rest.auth_url+'/auth/tokens',
+                                        'verb':'POST'})
+                project_key_token = raw_key_token.headers.get('X-Subject-Token')
+            except Exception as e:
+                return e
+
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":project_key_token}
+
+        try:
+            raw_key = self.rest.run_rest({'body':None,
+                                    'headers':headers,
+                                    'verify':True,
+                                    'url':self.rest.zs_url+"/nova/v2/%s/os-keypairs"%(zs_project_id),
+                                    'verb':'GET'})
+            keys = json.loads(raw_key.text)
+        except Exception as e:
+            return e
+
+        out = []
+        for key in keys['keypairs']:
+            out.append({'zs_key_name':key['keypair']['name'],'zs_public_key':key['keypair']['public_key']})
+
+        return out
 
     #Users
     def create_zsuser(self,input_dict):
@@ -707,8 +1040,9 @@ class Zerostack(object):
         ACCESS: Only Cloud and BU admins
         NOTE: None
         """
-        if(self.rest.token_scope == 'project'):
-            return 'Can not create user with project scope token.'
+        #print self.rest.token_scope()
+        #if(self.rest.token_scope() == 'project'):
+        #    return 'Can not create project with project scope token.'
 
         bu = []
         zs_bu_id = None
@@ -800,11 +1134,10 @@ class Zerostack(object):
                                         'verify':True,
                                         'url':self.rest.auth_url+'/users/%s'%(user_id),
                                         'verb':'DELETE'})
-            out = json.loads(raw_user.text)
         except Exception as e:
             return e
 
-        return out['summary']
+        return 'OK'
 
     def list_zsusers(self,bu_id=None):
         """
@@ -906,17 +1239,98 @@ class Zerostack(object):
         pass
         #input_dict = {'user_id',None,'project_id':None}
 
+    #placement policy
+    def create_zs_placement_policy(self):
+        pass
+
+    def delete_zs_placement_policy(self):
+        pass
+
+    def list_zs_placement_policies(self):
+        pass
+        #url = 'https://console.zerostack.com/v2/clusters/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/domains/c098588fb466427ebbc142036d3c25c3/projects/5673d547c00e4dd1bc48b7a4198ff2b5/placement_policies'
+
+    def get_zs_default_placement_policy(self):
+        pass
+        #url = 'https://console.zerostack.com/v2/clusters/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/domains/c098588fb466427ebbc142036d3c25c3/projects/5673d547c00e4dd1bc48b7a4198ff2b5/default_placement_policy'
+
+
     #Basic instance operations
     def create_zs_instance(self,input_dict):
         """
         DESC: Create an instance in a ZeroStack project.
         INPUTS: self object
-                input_dict -
+                input_dict - zs_vm_name - req
+                           - zs_vm_flavor - req
+                           - zs_vm_networks - req - array of networks
+                           - zs_sec_groups - req - array of security groups
+                           - zs_vm_ha - req - true/false
+                           - zs_vm_image - req
+                           - zs_sec_key - req
+                           - zs_boot_vol_size - req - vol in GB
+                           - zs_boot_vol_type - op - default HDD - HDD/SSD
+                           - zs_float_net - op
+                           - zs_availability_zone - op - default first available
         OUTPUTS: vm_id
-        ACCESS: All user accounts
+        ACCESS: All user accounts with access to the project.
         NOTE:
         """
-        pass
+        if(input_dict['zs_boot_vol_type'] == None or 'zs_boot_vol_type' not in input_dict):
+            input_dict['zs_boot_vol_type'] = 'HDD'
+
+        if('zs_boot_vol_type' in input_dict):
+            self.hd_type = string(input_dict['zs_boot_vol_type']).upper()
+
+        inputs = ['zs_vm_name','zs_vm_flavor','zs_vm_networks','zs_sec_groups','zs_vm_ha','zs_vm_image','zs_sec_key','zs_boot_vol_size']
+        for k,v in input_dict.items:
+            if(k not in inputs):
+                raise Exception("ZS VM create key %s, key error."%(k))
+            if(v == None):
+                raise Exception("ZS VM create value %s, required value not defined."%(v))
+
+        zs_bu = self.get_zsbu_id()
+        zs_project = self.get_zsproject()
+        zs_region = self.get_zs_region_id()
+
+        url = 'https://console.zerostack.com/v2/clusters/%s/projects/%s/vm'%(zs_region['zs_region_id'],zs_project['zs_project_id'])
+
+        meta = '{"location":"cage688-rackA02","created_by":"Jonathan","owner":"icp","zs_internal_vm_ha":"false","image_name":"Ubuntu 16.04", \
+               "delete_volume_on_termination":"true","isReservedFloatingIP":"false"},"user_data":"","delete_on_termination":true,"key_name":"icp_keypair", \
+               "availability_zone":"cage688-rackA02"}'
+
+        boot_vol = '{"volume_id":"{{.bootVol}}"}}},"bootVol":{"type":"OS::Cinder::Volume","os_req":{"volume":{"availability_zone":null,"description":null,"size":10, \
+                   "name":"bootVolume-junk","volume_type":"relhighiops_type","disk_bus":"virtio","device_type":"disk","source_type":"image","device_name":"/dev/vda", \
+                   "bootable":true,"tenant_id":"5673d547c00e4dd1bc48b7a4198ff2b5","imageRef":"220419f7-43b6-4815-a388-dd4240a2d8c5","enabled":true}}}'
+
+        network = ''
+
+        fip = '{"type":"OS::Neutron::FloatingIP","os_req":{"floatingip":{"floating_network_id":"%s","tenant_id":"%s","port_id":"{{.port_id_0}}"}}}' \
+              %(input_dict['zs_float_net'],zs_project['zs_project_id'])
+
+        server = ''
+
+
+        body = '{"name":"junk","resources":{"server":%s},"fip":%s}}'%(server,fip)
+        headers = {"content-type":"application/json;charset=UTF-8",
+                   "Origin":"https://console.zerostack.com",
+                   "X-Auth-Token":self.raw_token_body.headers.get('X-Subject-Token')}
+        try:
+            raw_proj = self.rest.run_rest({'body':body,
+                                            'headers':headers,
+                                            'verify':True,
+                                            'url':url,
+                                            'verb':'POST'})
+            out = json.loads(raw_proj.text)
+        except Exception as e:
+            return e
+
+        return out
+
+        #-H 'X-Auth-Token: 5656ff3959ea4abdb38f7adc0e72cb7b'
+
+        #--data-binary '{"name":"junk","resources":{"server":{"type":"OS::Nova::Server","os_req":{"server":{"name":"junk","flavorRef":"3","block_device_mapping_v2":[{"device_type":"disk","disk_bus":"virtio","device_name":"/dev/vda", \
+        #"source_type":"volume","destination_type":"volume","delete_on_termination":true,"boot_index":"0","uuid":"{{.bootVol}}"}],"networks":[{"uuid":"527caa24-be0e-45e5-a17f-7783ef52909c"}],"security_groups":[{"name":"icp"}],
+        #"metadata":"%s","os:scheduler_hints":%s,"fip":%s}}'
 
     def get_zs_instance_status(self):
         pass
@@ -963,6 +1377,18 @@ class Zerostack(object):
         NOTE: None
         """
         pass
+
+    def get_zs_instance_flavors(self):
+        """
+        DESC: Get the instance flavors available in the ZeroStack platform.
+        INPUTS: self object
+                zs_token - generated from ZS_Auth
+        OUTPUTS: None
+        ACCESS: All user accounts
+        NOTE: None
+        """
+        pass
+        #url = 'https://console.zerostack.com/os/6366ac07-6c56-4899-991d-b75607d02f32/regions/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/nova/v2.1/5673d547c00e4dd1bc48b7a4198ff2b5/flavors/detail'
 
     def connect_zs_network(self,input_dict):
         """
@@ -1139,6 +1565,10 @@ class Zerostack(object):
 
     def list_zs_volumes():
         pass
+
+    def list_zs_storage_pools():
+        pass
+        #url = 'https://console.zerostack.com/v2/clusters/e333d4a5-4a74-4afc-9f1f-1bd66da3f9e7/storage_pool_types'
 
     def get_zs_volume():
         pass
