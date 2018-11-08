@@ -1,6 +1,6 @@
-= ZeroStack Python SDK v0.1 Beta
+ZeroStack Python SDK v0.1 Beta
 
-== Python SDK library for interacting with ZeroStack Cloud Operating System API
+Python SDK library for interacting with ZeroStack Cloud Operating System API
 
 [![pypy](https://img.shields.io/pypi/v/solidfire-sdk-python.svg)](https://badge.fury.io/py/solidfire-sdk-python)
 [![python](https://img.shields.io/pypi/pyversions/solidfire-sdk-python.svg)](https://pypi.python.org/pypi/solidfire-sdk-python/)
