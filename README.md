@@ -1,4 +1,4 @@
-# ZeroStack Python SDK v0.1 Beta - Do not use docs still in Beta
+# ZeroStack Python SDK v0.1 Beta - Beta
 
 Python SDK library for interacting with ZeroStack Cloud Operating System API
 
